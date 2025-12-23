@@ -9,11 +9,21 @@ src/persona_sim/app/main.py
 src/persona_sim/core/config.py
 src/persona_sim/core/logging.py
 src/persona_sim/db/__init__.py
-src/persona_sim/db/engine.py
+src/persona_sim/db/base.py
+src/persona_sim/db/models.py
 src/persona_sim/db/session.py
 src/persona_sim/db/models/__init__.py
+src/persona_sim/db/models/simulation.py
+src/persona_sim/db/repositories/__init__.py
+src/persona_sim/db/repositories/sim_repo.py
 src/persona_sim/schemas/__init__.py
+src/persona_sim/schemas/eval.py
+src/persona_sim/schemas/persona.py
+src/persona_sim/schemas/scenario.py
+src/persona_sim/schemas/sim_state.py
+src/persona_sim/schemas/stimulus.py
 src/persona_sim/schemas/system.py
+src/persona_sim/schemas/transcript.py
 src/persona_sim/sim/__init__.py
 src/persona_sim/sim/agents.py
 src/persona_sim/sim/evaluator.py
@@ -25,3 +35,4 @@ src/personas.egg-info/dependency_links.txt
 src/personas.egg-info/requires.txt
 src/personas.egg-info/top_level.txt
 tests/test_health.py
+tests/test_sim_repo.py
