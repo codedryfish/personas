@@ -1,3 +1,28 @@
+Metadata-Version: 2.4
+Name: personas
+Version: 0.1.0
+Summary: Persona simulation backend MVP
+Author: Persona Sim Team
+License: MIT
+Requires-Python: >=3.11
+Description-Content-Type: text/markdown
+Requires-Dist: fastapi==0.115.0
+Requires-Dist: uvicorn[standard]==0.30.6
+Requires-Dist: pydantic==2.9.1
+Requires-Dist: pydantic-settings==2.4.0
+Requires-Dist: langchain==0.2.11
+Requires-Dist: langgraph==0.2.21
+Requires-Dist: sqlalchemy==2.0.32
+Requires-Dist: aiosqlite==0.20.0
+Requires-Dist: python-dotenv==1.0.1
+Requires-Dist: tenacity==8.5.0
+Requires-Dist: structlog==24.4.0
+Requires-Dist: httpx==0.27.2
+Provides-Extra: dev
+Requires-Dist: pytest==8.3.2; extra == "dev"
+Requires-Dist: ruff==0.6.1; extra == "dev"
+Requires-Dist: mypy==1.11.2; extra == "dev"
+
 # personas
 
 Persona simulation backend MVP built with FastAPI, LangGraph, and LangChain. The project favors a modular, typed, and testable architecture with SQLite-backed persistence for quick local development.
