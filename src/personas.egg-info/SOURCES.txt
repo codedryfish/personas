@@ -29,10 +29,14 @@ src/persona_sim/sim/agents.py
 src/persona_sim/sim/evaluator.py
 src/persona_sim/sim/graph.py
 src/persona_sim/sim/prompts.py
+src/persona_sim/sim/llm/__init__.py
+src/persona_sim/sim/llm/client.py
+src/persona_sim/sim/llm/structured.py
 src/personas.egg-info/PKG-INFO
 src/personas.egg-info/SOURCES.txt
 src/personas.egg-info/dependency_links.txt
 src/personas.egg-info/requires.txt
 src/personas.egg-info/top_level.txt
 tests/test_health.py
+tests/test_llm.py
 tests/test_sim_repo.py
