@@ -4,16 +4,17 @@ import asyncio
 from uuid import uuid4
 
 import pytest
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from persona_sim.db.base import Base
-from persona_sim.db.models import SimulationStatus
+from persona_sim.db.models import SimulationRun, SimulationStatus
 from persona_sim.db.repositories import get_run
 from persona_sim.schemas.eval import EvaluationReport, WillDecision
 from persona_sim.schemas.persona import AuthorityLevel, PersonaConstraints, PersonaSpec
 from persona_sim.schemas.scenario import ScenarioSpec
 from persona_sim.schemas.stimulus import Stimulus, StimulusType
-from persona_sim.sim.errors import NotFoundError, ValidationError
+from persona_sim.sim.errors import NotFoundError, RunFailedError, ValidationError
 from persona_sim.sim.service import SimulationService
 
 
@@ -178,3 +179,40 @@ def test_get_run_not_found_raises() -> None:
     service = SimulationService(session_factory=session_factory)
     with pytest.raises(NotFoundError):
         _run(service.get_run(uuid4()))
+
+
+def test_run_failure_marks_status_failed() -> None:
+    session_factory = _run(_session_factory())
+
+    async def _failing_responder(*_) -> str:  # type: ignore[override]
+        raise RuntimeError("boom")
+
+    service = SimulationService(
+        session_factory=session_factory,
+        persona_responder=_failing_responder,
+        evaluation_responder=_fake_evaluation_responder,
+    )
+    scenario = _scenario()
+    personas = [_persona("Buyer")]
+    stimuli = [Stimulus(type=StimulusType.MESSAGE, content="Hello")]
+
+    with pytest.raises(RunFailedError):
+        _run(
+            service.start_run(
+                scenario=scenario,
+                personas=personas,
+                stimuli=stimuli,
+                run_mode="single-turn",
+            )
+        )
+
+    async def _fetch_last_run():
+        async with session_factory() as session:
+            result = await session.execute(
+                select(SimulationRun).order_by(SimulationRun.created_at.desc()).limit(1)
+            )
+            return result.scalars().first()
+
+    run_record = _run(_fetch_last_run())
+    assert run_record is not None
+    assert run_record.status == SimulationStatus.FAILED

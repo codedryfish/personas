@@ -13,8 +13,9 @@ from typing import Sequence
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from persona_sim.db.models import SimulationStatus
 from persona_sim.core.config import get_settings
-from persona_sim.db.repositories import get_run
+from persona_sim.db.repositories import get_run, set_status
 from persona_sim.schemas.persona import PersonaSpec
 from persona_sim.schemas.scenario import ScenarioSpec
 from persona_sim.schemas.sim_state import SimulationState
@@ -86,10 +87,11 @@ class SimulationService:
         graph = build_simulation_graph(deps).compile()
         try:
             result = await graph.ainvoke(initial_state)
+            _ = GraphState.model_validate(result)
         except Exception as exc:  # pragma: no cover - propagated as domain error
+            await self._mark_run_failed(run_id)
             raise RunFailedError("Simulation run failed") from exc
 
-        _ = GraphState.model_validate(result)
         return run_id
 
     async def get_run(self, run_id: uuid.UUID) -> SimulationState:
@@ -100,6 +102,15 @@ class SimulationService:
         if dto is None:
             raise NotFoundError(f"Run {run_id} not found")
         return dto.to_simulation_state()
+
+    async def _mark_run_failed(self, run_id: uuid.UUID) -> None:
+        try:
+            async with self._session_factory() as session:
+                await set_status(session, run_id=run_id, status=SimulationStatus.FAILED)
+        except LookupError:  # pragma: no cover - best-effort status update
+            return
+        except Exception:  # pragma: no cover - best-effort status update
+            return
 
     @staticmethod
     def _validate_inputs(
