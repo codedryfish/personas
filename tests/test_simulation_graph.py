@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from uuid import uuid4
 
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
@@ -67,7 +68,23 @@ async def _fake_persona_responder(
     prompt_text = " ".join(getattr(message, "content", "") for message in messages)
     stance = "yes" if "Follow-up" not in prompt_text else "no"
     severity = "low" if stance == "yes" else "high"
-    return f'{{"stance": "{stance}", "severity": "{severity}", "message": "ok"}}'
+    objections = [
+        {
+            "category": "cost",
+            "detail": "Too expensive",
+            "severity": severity,
+        }
+    ]
+    return json.dumps(
+        {
+            "stance": stance,
+            "top_concerns": ["budget"],
+            "objections": objections if stance == "no" else [],
+            "required_proof": ["pricing benchmark"],
+            "short_answer": "ok",
+            "clarifying_questions": ["Any constraints?"] if stance == "no" else [],
+        }
+    )
 
 
 async def _fake_evaluation_responder(messages) -> EvaluationReport:  # type: ignore[override]

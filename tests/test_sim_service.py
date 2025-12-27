@@ -55,7 +55,11 @@ def _scenario() -> ScenarioSpec:
 
 
 async def _fake_persona_responder(*_) -> str:  # type: ignore[override]
-    return "Yes, I agree."
+    return (
+        '{"stance": "yes", "top_concerns": ["value"], "objections": [], '
+        '"required_proof": ["case study"], "short_answer": "Yes, I agree.", '
+        '"clarifying_questions": []}'
+    )
 
 
 async def _fake_evaluation_responder(*_) -> EvaluationReport:  # type: ignore[override]

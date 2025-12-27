@@ -45,11 +45,11 @@ def _scenario() -> ScenarioSpec:
 def test_persona_system_prompt_includes_required_directives() -> None:
     content = build_persona_system_prompt(_persona(), _scenario(), mode="daily_user")[0].content
 
-    assert "top 3 concerns" in content
-    assert "yes/no/reluctant stance" in content
+    assert "PersonaResponse JSON" in content
+    assert "stance: one of [yes,no,reluctant]" in content
+    assert "top_concerns: array of 1-3 strings" in content
     assert "never invent external facts" in content
-    assert "under 250 words" in content
-    assert "clarifying questions" in content
+    assert "No extra commentary" in content
 
 
 def test_persona_user_prompt_includes_structure_and_limits() -> None:
@@ -57,8 +57,8 @@ def test_persona_user_prompt_includes_structure_and_limits() -> None:
     content = build_persona_user_prompt(stimulus, question="How does this affect your workflow?")[0].content
 
     assert "Stimulus type: feature" in content
-    assert "top 3 concerns" in content
-    assert "under 250 words" in content
+    assert "PersonaResponse JSON" in content
+    assert "short_answer: string capped at 120 words" in content
 
 
 def test_evaluator_prompt_requests_evaluation_report_json() -> None:
