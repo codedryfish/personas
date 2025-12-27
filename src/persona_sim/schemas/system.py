@@ -7,3 +7,4 @@ class HealthResponse(BaseModel):
     status: str = Field(default="ok", description="Service liveness indicator.")
     environment: str = Field(default="local", description="Deployment environment.")
     version: str = Field(default="0.1.0", description="Application version.")
+    database: str = Field(default="ok", description="Database connectivity status.")
