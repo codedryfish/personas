@@ -12,3 +12,4 @@ def test_health_endpoint() -> None:
     body = response.json()
     assert body["status"] == "ok"
     assert "environment" in body
+    assert body["database"] in {"ok", "unavailable"}

@@ -5,6 +5,7 @@ from fastapi import FastAPI
 
 from persona_sim import __version__
 from persona_sim.api.routes.health import router as health_router
+from persona_sim.api.routes.simulations import router as simulations_router
 from persona_sim.core.config import get_settings
 from persona_sim.core.logging import setup_logging
 from persona_sim.db import verify_database_connection
@@ -30,6 +31,7 @@ def create_app() -> FastAPI:
     )
 
     application.include_router(health_router)
+    application.include_router(simulations_router)
 
     return application
 
