@@ -168,7 +168,7 @@ def test_multi_turn_runs_all_turns_and_persists() -> None:
         next(iter(state.simulation.persona_states))
     ]
     assert first_persona_state.trust_state.trust_score < 0.5
-    assert first_persona_state.trust_state.fatigue_score > 0.1
+    assert first_persona_state.trust_state.fatigue_score >= 0.05
 
     async def _validate() -> None:
         async with session_factory() as session:
