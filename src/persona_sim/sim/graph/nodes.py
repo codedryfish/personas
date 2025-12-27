@@ -16,6 +16,7 @@ from persona_sim.db.models import SimulationStatus
 from persona_sim.db.repositories import add_event, create_run, save_evaluation, set_status
 from persona_sim.schemas.eval import EvaluationReport, ObjectionSeverity, WillDecision
 from persona_sim.schemas.persona import PersonaSpec
+from persona_sim.schemas.persona_response import PersonaResponse as PersonaResponsePayload
 from persona_sim.schemas.sim_state import PersonaState, SimulationState, TrustState
 from persona_sim.schemas.transcript import TranscriptEvent, TranscriptEventType
 from persona_sim.sim.heuristics import (
@@ -33,7 +34,7 @@ from persona_sim.sim.prompts.persona_prompts import (
 )
 
 PersonaResponder = Callable[
-    [Sequence[BaseMessage], str, float], Awaitable[str | PersonaResponseSummary]
+    [Sequence[BaseMessage], str, float], Awaitable[str | PersonaResponsePayload]
 ]
 EvaluationResponder = Callable[[Sequence[BaseMessage]], Awaitable[EvaluationReport]]
 
@@ -55,10 +56,10 @@ class GraphDependencies:
 
 async def _default_persona_responder(
     messages: Sequence[BaseMessage], model_name: str, temperature: float
-) -> PersonaResponseSummary:
+) -> PersonaResponsePayload:
     loop = asyncio.get_running_loop()
     return await loop.run_in_executor(
-        None, lambda: invoke_structured(messages, PersonaResponseSummary)
+        None, lambda: invoke_structured(messages, PersonaResponsePayload)
     )
 
 
@@ -71,24 +72,6 @@ def _timestamp() -> str:
     return datetime.now(UTC).isoformat()
 
 
-def _infer_stance(content: str) -> WillDecision:
-    lowered = content.lower()
-    if "no" in lowered or "reject" in lowered:
-        return WillDecision.NO
-    if "reluctant" in lowered or "maybe" in lowered:
-        return WillDecision.RELUCTANT
-    return WillDecision.YES
-
-
-def _infer_severity(content: str) -> ObjectionSeverity:
-    lowered = content.lower()
-    if any(keyword in lowered for keyword in ["high", "blocker", "critical"]):
-        return ObjectionSeverity.HIGH
-    if "medium" in lowered or "moderate" in lowered:
-        return ObjectionSeverity.MEDIUM
-    return ObjectionSeverity.LOW
-
-
 def _highest_severity(summary: PersonaResponseSummary) -> ObjectionSeverity:
     if any(obj.severity == ObjectionSeverity.HIGH for obj in summary.objections):
         return ObjectionSeverity.HIGH
@@ -97,53 +80,42 @@ def _highest_severity(summary: PersonaResponseSummary) -> ObjectionSeverity:
     return ObjectionSeverity.LOW
 
 
-def _to_summary(payload: dict) -> PersonaResponseSummary:
-    data = dict(payload)
-    severity_value = data.pop("severity", None)
-    objections = data.get("objections") or []
-    if severity_value and not objections:
-        try:
-            severity = ObjectionSeverity(str(severity_value))
-            objections = [PersonaResponseObjection(detail="Reported severity", severity=severity)]
-        except ValueError:
-            objections = []
-    data["objections"] = objections
-    if "message" not in data:
-        data["message"] = str(payload)
-    return PersonaResponseSummary.model_validate(data)
-
-
-def _parse_summary(
-    raw_response: str | PersonaResponseSummary, prompt_messages: Sequence[BaseMessage]
-) -> PersonaResponseSummary:
-    if isinstance(raw_response, PersonaResponseSummary):
+def _parse_persona_response(
+    raw_response: str | PersonaResponsePayload, prompt_messages: Sequence[BaseMessage]
+) -> PersonaResponsePayload:
+    if isinstance(raw_response, PersonaResponsePayload):
         return raw_response
 
     content = str(raw_response)
     stripped = content.strip()
+    if not stripped:
+        return invoke_structured(prompt_messages, PersonaResponsePayload)
 
-    if stripped:
+    try:
+        return PersonaResponsePayload.model_validate_json(content)
+    except Exception:
+        pass
+
+    if stripped.startswith("{") or stripped.startswith("["):
         try:
-            return PersonaResponseSummary.model_validate_json(content)
+            parsed = json.loads(content)
+            return PersonaResponsePayload.model_validate(parsed)
         except Exception:
-            pass
-
-        if stripped.startswith("{") or stripped.startswith("["):
             try:
-                parsed = json.loads(content)
-                return _to_summary(parsed)
-            except Exception:
-                try:
-                    return invoke_structured(prompt_messages, PersonaResponseSummary)
-                except StructuredOutputError:
-                    pass
+                return invoke_structured(prompt_messages, PersonaResponsePayload)
+            except StructuredOutputError:
+                pass
 
-    stance = _infer_stance(content)
-    severity = _infer_severity(content)
-    objections: list[PersonaResponseObjection] = []
-    if severity != ObjectionSeverity.LOW:
-        objections.append(PersonaResponseObjection(detail="Inferred objection", severity=severity))
-    return PersonaResponseSummary(message=content, stance=stance, objections=objections)
+    return invoke_structured(prompt_messages, PersonaResponsePayload)
+
+
+def _to_summary_from_payload(payload: PersonaResponsePayload) -> PersonaResponseSummary:
+    objections = [
+        PersonaResponseObjection(detail=obj.detail, severity=obj.severity)
+        for obj in payload.objections
+    ]
+    stance = WillDecision(payload.stance.value)
+    return PersonaResponseSummary(message=payload.short_answer, stance=stance, objections=objections)
 
 
 def _resolve_persona_mode(
@@ -208,14 +180,20 @@ def _stimulus_summary(turn_input: TurnInput) -> str:
     return f"Stimulus ({stimulus.type.value}): {stimulus.content}.{attachments}"
 
 
-def _event_for_response(persona: PersonaSpec, summary: PersonaResponseSummary) -> TranscriptEvent:
+def _event_for_response(
+    persona: PersonaSpec, payload: PersonaResponsePayload, summary: PersonaResponseSummary
+) -> TranscriptEvent:
     severity = _highest_severity(summary)
     return TranscriptEvent(
         timestamp=_timestamp(),
         actor=persona.name,
         event_type=TranscriptEventType.ANSWER,
         content=summary.message,
-        meta={"stance": summary.stance.value, "severity": severity.value},
+        meta={
+            "stance": summary.stance.value,
+            "severity": severity.value,
+            "raw": payload.model_dump(),
+        },
     )
 
 
@@ -278,13 +256,14 @@ async def persona_response_node(state: GraphState, deps: GraphDependencies) -> G
             state.config.model_name,
             state.config.temperature,
         )
-        summary = _parse_summary(raw_response, prompt_messages)
-        response_event = _event_for_response(persona, summary)
+        payload = _parse_persona_response(raw_response, prompt_messages)
+        summary = _to_summary_from_payload(payload)
+        response_event = _event_for_response(persona, payload, summary)
         responses.append(response_event)
         persona_responses.append(
             PersonaResponse(
                 persona_id=persona.id,
-                content=summary.message,
+                content=payload.short_answer,
                 persona_mode=persona_mode,
                 summary=summary,
                 stance=summary.stance,

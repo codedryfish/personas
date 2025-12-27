@@ -21,8 +21,14 @@ CLARIFICATION_DIRECTIVE = (
     "If critical details are missing, ask clarifying questions instead of assuming facts."
 )
 STRUCTURE_DIRECTIVE = (
-    "Explicitly list your top 3 concerns, clearly state a yes/no/reluctant stance, "
-    "and specify the proof or evidence you need."
+    "Respond only with valid PersonaResponse JSON: "
+    "{stance: one of [yes,no,reluctant]; "
+    "top_concerns: array of 1-3 strings; "
+    "objections: array of Objection {category, detail, severity}; "
+    "required_proof: array of strings; "
+    "short_answer: string capped at 120 words; "
+    "clarifying_questions: optional array with up to 3 strings}. "
+    "No extra commentary."
 )
 
 _MODE_DESCRIPTORS = {

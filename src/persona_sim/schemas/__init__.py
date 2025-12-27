@@ -1,6 +1,7 @@
 """Pydantic schemas exposed by the simulator."""
 
 from persona_sim.schemas.eval import EvaluationReport, Objection
+from persona_sim.schemas.persona_response import PersonaResponse
 from persona_sim.schemas.persona import AuthorityLevel, PersonaConstraints, PersonaSpec
 from persona_sim.schemas.scenario import ScenarioSpec
 from persona_sim.schemas.sim_state import PersonaState, SimulationState, TrustState
@@ -14,6 +15,7 @@ __all__ = [
     "Objection",
     "PersonaConstraints",
     "PersonaSpec",
+    "PersonaResponse",
     "PersonaState",
     "ScenarioSpec",
     "SimulationState",

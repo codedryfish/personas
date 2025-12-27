@@ -57,7 +57,7 @@ class PersonaResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     persona_id: UUID = Field(..., description="Identifier of the responding persona.")
-    content: str = Field(..., description="Raw response content from the persona model.")
+    content: str = Field(..., description="Rendered short answer from the persona response.")
     persona_mode: str = Field(..., description="Prompting mode used for the persona.")
     summary: PersonaResponseSummary = Field(
         ..., description="Structured summary parsed from the persona response."
