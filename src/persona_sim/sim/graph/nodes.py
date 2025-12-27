@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from collections.abc import Awaitable, Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -17,16 +18,23 @@ from persona_sim.schemas.eval import EvaluationReport, ObjectionSeverity, WillDe
 from persona_sim.schemas.persona import PersonaSpec
 from persona_sim.schemas.sim_state import PersonaState, SimulationState, TrustState
 from persona_sim.schemas.transcript import TranscriptEvent, TranscriptEventType
+from persona_sim.sim.heuristics import (
+    PersonaResponseObjection,
+    PersonaResponseSummary,
+    apply_persona_heuristics,
+)
 from persona_sim.sim.graph.state import GraphState, PersonaResponse, RunMode, TurnInput
 from persona_sim.sim.llm.client import get_llm
-from persona_sim.sim.llm.structured import invoke_structured
+from persona_sim.sim.llm.structured import StructuredOutputError, invoke_structured
 from persona_sim.sim.prompts.eval_prompts import build_evaluator_prompt
 from persona_sim.sim.prompts.persona_prompts import (
     build_persona_system_prompt,
     build_persona_user_prompt,
 )
 
-PersonaResponder = Callable[[Sequence[BaseMessage], str, float], Awaitable[str]]
+PersonaResponder = Callable[
+    [Sequence[BaseMessage], str, float], Awaitable[str | PersonaResponseSummary]
+]
 EvaluationResponder = Callable[[Sequence[BaseMessage]], Awaitable[EvaluationReport]]
 
 _DEFAULT_TRUST = 0.5
@@ -47,10 +55,11 @@ class GraphDependencies:
 
 async def _default_persona_responder(
     messages: Sequence[BaseMessage], model_name: str, temperature: float
-) -> str:
-    llm = get_llm(model_name, temperature)
-    response = await llm.ainvoke(messages)
-    return str(response.content)
+) -> PersonaResponseSummary:
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(
+        None, lambda: invoke_structured(messages, PersonaResponseSummary)
+    )
 
 
 async def _default_evaluation_responder(messages: Sequence[BaseMessage]) -> EvaluationReport:
@@ -60,10 +69,6 @@ async def _default_evaluation_responder(messages: Sequence[BaseMessage]) -> Eval
 
 def _timestamp() -> str:
     return datetime.now(UTC).isoformat()
-
-
-def _clamp(value: float) -> float:
-    return max(0.0, min(1.0, value))
 
 
 def _infer_stance(content: str) -> WillDecision:
@@ -84,30 +89,61 @@ def _infer_severity(content: str) -> ObjectionSeverity:
     return ObjectionSeverity.LOW
 
 
-def _trust_delta(stance: WillDecision) -> float:
-    if stance == WillDecision.YES:
-        return 0.12
-    if stance == WillDecision.RELUCTANT:
-        return -0.05
-    return -0.18
+def _highest_severity(summary: PersonaResponseSummary) -> ObjectionSeverity:
+    if any(obj.severity == ObjectionSeverity.HIGH for obj in summary.objections):
+        return ObjectionSeverity.HIGH
+    if any(obj.severity == ObjectionSeverity.MEDIUM for obj in summary.objections):
+        return ObjectionSeverity.MEDIUM
+    return ObjectionSeverity.LOW
 
 
-def _fatigue_delta(stance: WillDecision) -> float:
-    if stance == WillDecision.YES:
-        return 0.03
-    if stance == WillDecision.RELUCTANT:
-        return 0.06
-    return 0.08
+def _to_summary(payload: dict) -> PersonaResponseSummary:
+    data = dict(payload)
+    severity_value = data.pop("severity", None)
+    objections = data.get("objections") or []
+    if severity_value and not objections:
+        try:
+            severity = ObjectionSeverity(str(severity_value))
+            objections = [PersonaResponseObjection(detail="Reported severity", severity=severity)]
+        except ValueError:
+            objections = []
+    data["objections"] = objections
+    if "message" not in data:
+        data["message"] = str(payload)
+    return PersonaResponseSummary.model_validate(data)
 
 
-def _severity_adjustments(severity: ObjectionSeverity) -> tuple[float, float, float]:
-    match severity:
-        case ObjectionSeverity.HIGH:
-            return (-0.1, 0.1, -0.06)
-        case ObjectionSeverity.MEDIUM:
-            return (-0.05, 0.05, -0.03)
-        case _:
-            return (0.02, 0.01, 0.04)
+def _parse_summary(
+    raw_response: str | PersonaResponseSummary, prompt_messages: Sequence[BaseMessage]
+) -> PersonaResponseSummary:
+    if isinstance(raw_response, PersonaResponseSummary):
+        return raw_response
+
+    content = str(raw_response)
+    stripped = content.strip()
+
+    if stripped:
+        try:
+            return PersonaResponseSummary.model_validate_json(content)
+        except Exception:
+            pass
+
+        if stripped.startswith("{") or stripped.startswith("["):
+            try:
+                parsed = json.loads(content)
+                return _to_summary(parsed)
+            except Exception:
+                try:
+                    return invoke_structured(prompt_messages, PersonaResponseSummary)
+                except StructuredOutputError:
+                    pass
+
+    stance = _infer_stance(content)
+    severity = _infer_severity(content)
+    objections: list[PersonaResponseObjection] = []
+    if severity != ObjectionSeverity.LOW:
+        objections.append(PersonaResponseObjection(detail="Inferred objection", severity=severity))
+    return PersonaResponseSummary(message=content, stance=stance, objections=objections)
 
 
 def _resolve_persona_mode(
@@ -172,15 +208,14 @@ def _stimulus_summary(turn_input: TurnInput) -> str:
     return f"Stimulus ({stimulus.type.value}): {stimulus.content}.{attachments}"
 
 
-def _event_for_response(persona: PersonaSpec, content: str) -> TranscriptEvent:
-    stance = _infer_stance(content)
-    severity = _infer_severity(content)
+def _event_for_response(persona: PersonaSpec, summary: PersonaResponseSummary) -> TranscriptEvent:
+    severity = _highest_severity(summary)
     return TranscriptEvent(
         timestamp=_timestamp(),
         actor=persona.name,
         event_type=TranscriptEventType.ANSWER,
-        content=content,
-        meta={"stance": stance.value, "severity": severity.value},
+        content=summary.message,
+        meta={"stance": summary.stance.value, "severity": severity.value},
     )
 
 
@@ -237,19 +272,23 @@ async def persona_response_node(state: GraphState, deps: GraphDependencies) -> G
         )
         system_prompt = build_persona_system_prompt(persona, simulation.scenario, mode=persona_mode)
         user_prompt = build_persona_user_prompt(turn_input.stimulus, turn_input.question)
-        content = await deps.persona_responder(
+        prompt_messages = [*system_prompt, *user_prompt]
+        raw_response = await deps.persona_responder(
             [*system_prompt, *user_prompt],
             state.config.model_name,
             state.config.temperature,
         )
-        response_event = _event_for_response(persona, content)
+        summary = _parse_summary(raw_response, prompt_messages)
+        response_event = _event_for_response(persona, summary)
         responses.append(response_event)
         persona_responses.append(
             PersonaResponse(
                 persona_id=persona.id,
-                content=content,
-                stance=_infer_stance(content),
-                objection_severity=_infer_severity(content),
+                content=summary.message,
+                persona_mode=persona_mode,
+                summary=summary,
+                stance=summary.stance,
+                objection_severity=_highest_severity(summary),
             )
         )
 
@@ -268,28 +307,14 @@ async def update_state_node(state: GraphState) -> GraphState:
         persona_state = persona_states.get(response.persona_id) or _initialize_persona_state(
             next(p for p in state.simulation.personas if p.id == response.persona_id)
         )
-        trust_state = persona_state.trust_state
-
-        stance_trust = _trust_delta(response.stance)
-        stance_fatigue = _fatigue_delta(response.stance)
-        severity_trust, severity_fatigue, risk_delta = _severity_adjustments(
-            response.objection_severity
+        updated_trust_state = apply_persona_heuristics(
+            previous=persona_state.trust_state,
+            response=response.summary,
+            mode=response.persona_mode,
         )
 
-        updated_trust = _clamp(trust_state.trust_score + stance_trust + severity_trust)
-        updated_fatigue = _clamp(trust_state.fatigue_score + stance_fatigue + severity_fatigue)
-        updated_risk = _clamp(trust_state.risk_tolerance + risk_delta)
-
         persona_states[response.persona_id] = persona_state.model_copy(
-            update={
-                "trust_state": trust_state.model_copy(
-                    update={
-                        "trust_score": updated_trust,
-                        "fatigue_score": updated_fatigue,
-                        "risk_tolerance": updated_risk,
-                    }
-                )
-            }
+            update={"trust_state": updated_trust_state}
         )
 
     next_turn = state.current_turn + 1

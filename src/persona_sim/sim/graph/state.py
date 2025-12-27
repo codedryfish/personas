@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from enum import Enum
+from typing import Any
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -10,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from persona_sim.schemas.eval import ObjectionSeverity, WillDecision
 from persona_sim.schemas.sim_state import SimulationState
 from persona_sim.schemas.stimulus import Stimulus
+from persona_sim.sim.heuristics import PersonaResponseSummary
 
 
 class RunMode(str, Enum):
@@ -56,11 +58,29 @@ class PersonaResponse(BaseModel):
 
     persona_id: UUID = Field(..., description="Identifier of the responding persona.")
     content: str = Field(..., description="Raw response content from the persona model.")
-    stance: WillDecision = Field(..., description="Stance inferred from the response content.")
+    persona_mode: str = Field(..., description="Prompting mode used for the persona.")
+    summary: PersonaResponseSummary = Field(
+        ..., description="Structured summary parsed from the persona response."
+    )
+    stance: WillDecision = Field(
+        ..., description="Stance inferred from the response content for quick access."
+    )
     objection_severity: ObjectionSeverity = Field(
         default=ObjectionSeverity.LOW,
         description="Highest objection severity inferred from the response.",
     )
+
+    def model_post_init(self, __context: Any) -> None:
+        # Keep denormalized stance and severity aligned with the structured summary.
+        object.__setattr__(self, "stance", self.summary.stance)
+        highest = ObjectionSeverity.LOW
+        for objection in self.summary.objections:
+            if objection.severity == ObjectionSeverity.HIGH:
+                highest = ObjectionSeverity.HIGH
+                break
+            if objection.severity == ObjectionSeverity.MEDIUM and highest == ObjectionSeverity.LOW:
+                highest = ObjectionSeverity.MEDIUM
+        object.__setattr__(self, "objection_severity", highest)
 
 
 class GraphState(BaseModel):
