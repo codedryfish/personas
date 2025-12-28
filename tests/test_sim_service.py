@@ -137,17 +137,6 @@ def test_start_run_rejects_invalid_inputs() -> None:
                 scenario=scenario,
                 personas=[persona],
                 stimuli=[stimulus],
-                steps=2,
-                run_mode="single-turn",
-            )
-        )
-
-    with pytest.raises(ValidationError):
-        _run(
-            _run_call(
-                scenario=scenario,
-                personas=[persona],
-                stimuli=[stimulus],
                 run_mode="invalid-mode",
             )
         )
@@ -183,6 +172,41 @@ def test_get_run_not_found_raises() -> None:
     service = SimulationService(session_factory=session_factory)
     with pytest.raises(NotFoundError):
         _run(service.get_run(uuid4()))
+
+
+def test_start_run_repeats_last_stimulus_when_steps_exceed_count() -> None:
+    session_factory = _run(_session_factory())
+    service = SimulationService(
+        session_factory=session_factory,
+        persona_responder=_fake_persona_responder,
+        evaluation_responder=_fake_evaluation_responder,
+    )
+    scenario = _scenario()
+    personas = [_persona("Buyer")]
+    stimuli = [Stimulus(type=StimulusType.MESSAGE, content="Hello", question="First?")]
+
+    run_id = _run(
+        service.start_run(
+            scenario=scenario,
+            personas=personas,
+            stimuli=stimuli,
+            run_mode="multi-turn",
+            steps=2,
+        )
+    )
+
+    async def _fetch():
+        async with session_factory() as session:
+            return await get_run(session, run_id)
+
+    stored = _run(_fetch())
+    assert stored is not None
+    assert stored.status == SimulationStatus.COMPLETED
+    assert len(stored.transcript) == 6
+
+    question_events = [event for event in stored.transcript if event.event_type.value == "question"]
+    assert len(question_events) == 2
+    assert {event.meta.get("step") for event in question_events} == {1, 2}
 
 
 def test_run_failure_marks_status_failed() -> None:

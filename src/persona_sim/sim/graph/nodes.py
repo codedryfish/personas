@@ -154,13 +154,17 @@ def _attach_event(
     event_type: TranscriptEventType,
     content: str,
     meta: dict | None = None,
+    step: int | None = None,
 ) -> SimulationState:
+    merged_meta = dict(meta or {})
+    if step is not None:
+        merged_meta.setdefault("step", step)
     event = TranscriptEvent(
         timestamp=_timestamp(),
         actor=actor,
         event_type=event_type,
         content=content,
-        meta=meta,
+        meta=merged_meta or None,
     )
     transcript = [*simulation.transcript, event]
     return simulation.model_copy(update={"transcript": transcript})
@@ -181,7 +185,11 @@ def _stimulus_summary(turn_input: TurnInput) -> str:
 
 
 def _event_for_response(
-    persona: PersonaSpec, payload: PersonaResponsePayload, summary: PersonaResponseSummary
+    persona: PersonaSpec,
+    payload: PersonaResponsePayload,
+    summary: PersonaResponseSummary,
+    *,
+    step: int,
 ) -> TranscriptEvent:
     severity = _highest_severity(summary)
     return TranscriptEvent(
@@ -190,6 +198,7 @@ def _event_for_response(
         event_type=TranscriptEventType.ANSWER,
         content=summary.message,
         meta={
+            "step": step,
             "stance": summary.stance.value,
             "severity": severity.value,
             "raw": payload.model_dump(),
@@ -240,6 +249,7 @@ async def persona_response_node(state: GraphState, deps: GraphDependencies) -> G
         actor="system",
         event_type=TranscriptEventType.QUESTION,
         content=question_event_content,
+        step=state.current_turn + 1,
     )
 
     responses: list[TranscriptEvent] = []
@@ -258,7 +268,9 @@ async def persona_response_node(state: GraphState, deps: GraphDependencies) -> G
         )
         payload = _parse_persona_response(raw_response, prompt_messages)
         summary = _to_summary_from_payload(payload)
-        response_event = _event_for_response(persona, payload, summary)
+        response_event = _event_for_response(
+            persona, payload, summary, step=state.current_turn + 1
+        )
         responses.append(response_event)
         persona_responses.append(
             PersonaResponse(

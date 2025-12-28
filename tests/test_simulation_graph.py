@@ -195,3 +195,34 @@ def test_multi_turn_runs_all_turns_and_persists() -> None:
             assert len(run.transcript) == 8
 
     asyncio.run(_validate())
+
+
+def test_transcript_marks_steps_and_evaluates_once() -> None:
+    state, _ = asyncio.run(_run_graph(RunMode.MULTI_TURN))
+
+    question_events = [
+        event
+        for event in state.simulation.transcript
+        if event.event_type == TranscriptEventType.QUESTION
+    ]
+    answer_events = [
+        event
+        for event in state.simulation.transcript
+        if event.event_type == TranscriptEventType.ANSWER
+    ]
+
+    assert {event.meta.get("step") for event in question_events} == {1, 2}
+
+    answers_by_step: dict[int, int] = {}
+    for event in answer_events:
+        step = event.meta.get("step")
+        answers_by_step[step] = answers_by_step.get(step, 0) + 1
+    assert answers_by_step == {1: 2, 2: 2}
+
+    evaluation_events = [
+        event
+        for event in state.simulation.transcript
+        if event.event_type == TranscriptEventType.EVALUATION
+    ]
+    assert len(evaluation_events) == 1
+    assert state.simulation.transcript[-1] == evaluation_events[0]

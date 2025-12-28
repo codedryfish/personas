@@ -59,7 +59,10 @@ class SimulationService:
         self._validate_inputs(personas=personas, stimuli=stimuli, steps=steps, run_mode=run_mode)
         mode = RunMode(run_mode)
         run_id = uuid.uuid4()
-        turns = [TurnInput(stimulus=stimulus) for stimulus in stimuli[:steps]]
+        turns = []
+        for idx in range(steps):
+            stimulus = stimuli[min(idx, len(stimuli) - 1)]
+            turns.append(TurnInput(stimulus=stimulus, question=stimulus.question))
         config = RunConfig(
             run_id=run_id,
             model_name=self._model_name,
@@ -122,8 +125,6 @@ class SimulationService:
             raise ValidationError("At least one stimulus is required")
         if steps <= 0:
             raise ValidationError("steps must be positive")
-        if steps > len(stimuli):
-            raise ValidationError("steps cannot exceed provided stimuli count")
         try:
             RunMode(run_mode)
         except ValueError as exc:  # pragma: no cover - simple value guard
