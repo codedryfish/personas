@@ -22,8 +22,10 @@ class Stimulus(BaseModel):
 
     type: StimulusType = Field(..., description="Type of the stimulus.")
     content: str = Field(..., description="Primary content of the stimulus.")
+    question: Optional[str] = Field(
+        default=None, description="Optional follow-up question paired with the stimulus."
+    )
     attachments: Optional[List[str]] = Field(
         default=None,
         description="Optional list of attachment references, such as URLs or asset IDs.",
     )
-
