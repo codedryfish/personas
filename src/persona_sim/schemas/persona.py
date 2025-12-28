@@ -35,7 +35,27 @@ class PersonaConstraints(BaseModel):
 class PersonaSpec(BaseModel):
     """Specification for a simulated persona."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={
+            "example": {
+                "id": "2fdab821-76d6-4c04-9a4b-6bc0099ae0b0",
+                "name": "Priya Desai",
+                "role": "Head of Compliance Technology",
+                "sector": "Banking",
+                "locale": "UK",
+                "incentives": ["prove audit readiness", "shorten change cycles"],
+                "fears": ["vendor lock-in", "regulatory gaps"],
+                "constraints": {
+                    "time_per_week_minutes": 180,
+                    "budget_gbp": 75000,
+                    "ai_trust_level": 3,
+                    "authority_level": "high",
+                },
+                "communication_style": "crisp, metric-led",
+            }
+        },
+    )
 
     id: UUID = Field(..., description="Unique identifier for the persona.")
     name: str = Field(..., description="Human-readable persona name.")
@@ -56,4 +76,3 @@ class PersonaSpec(BaseModel):
     communication_style: Optional[str] = Field(
         default=None, description="Preferred communication style for the persona."
     )
-
