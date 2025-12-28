@@ -18,7 +18,16 @@ class StimulusType(str, Enum):
 class Stimulus(BaseModel):
     """Input stimulus presented during a simulation run."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={
+            "example": {
+                "type": "feature",
+                "content": "Adaptive SMCR evidence pack generator with audit trails.",
+                "question": "What gaps remain for FCA alignment?",
+            }
+        },
+    )
 
     type: StimulusType = Field(..., description="Type of the stimulus.")
     content: str = Field(..., description="Primary content of the stimulus.")
